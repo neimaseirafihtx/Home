@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home Wealth Analysis — Neima Seirafipour — Houston, TX</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen font-sans">
+<div class="p-4 md:p-8"><div class="max-w-3xl mx-auto" id="root"></div></div>
+<script>
+// ═══════════════════════════════════════════════════════════════
+// DATA — Wells Fargo statements, closing disclosure, amort schedule
+// ═══════════════════════════════════════════════════════════════
+const MO_OWNED = 63;
+const PP = 477000, FIN = 310000, DP = PP - FIN, RATE = 0.02375, MR = RATE/12;
+const BAL = 226111, MV = 609000;
+const APP = MV - PP, APP_PCT = ((MV/PP)-1)*100;
+const ANN_APP = (Math.pow(MV/PP,1/(MO_OWNED/12))-1)*100;
+const EQ = MV - BAL, PPAID = FIN - BAL, NEG = EQ - DP;
+
+// Closing costs from Closing Disclosure (12/30/2020)
+const CLOSING_COSTS_TOTAL = 10402; // borrower-paid
+const SELLER_CREDIT = 8500;
+const NET_CLOSING_COSTS = CLOSING_COSTS_TOTAL - SELLER_CREDIT; // ~$1,902
+const CASH_TO_CLOSE = 161926;
+const EARNEST_DEPOSIT = 5000;
+const INITIAL_ESCROW_MO = 1103; // $1,102.57 at closing
+const ORIG_PI = 1204.82;
+
+// Statement YTD data
+const STMT=[
+  {l:"2021",b:299387,p:10613,i:6651,e:15434,t:32700,r:14400},
+  {l:"2022",b:285072,p:13816,i:7517,e:12084,t:33417,r:14400},
+  {l:"2023",b:267182,p:17389,i:6562,e:10994,t:34945,r:14400},
+  {l:"2024",b:248891,p:17792,i:6130,e:10642,t:34563,r:9600},
+  {l:"2025",b:230013,p:17823,i:5686,e:12346,t:35854,r:9600},
+  {l:"2026 YTD",b:226111,p:3902,i:1351,e:3246,t:8499,r:0},
+];
+let cP=0,cI=0,cE=0,cT=0,cR=0;
+const Y=STMT.map(s=>{cP+=s.p;cI+=s.i;cE+=s.e;cT+=s.t;cR+=s.r;return{...s,cP,cI,cE,cT,cR,nc:cT-cR}});
+const T=Y[Y.length-1];
+const TOTAL_RENTAL_INCOME = T.cR;
+
+// Rent comparison
+const rentY=[
+  {l:"2021",r:1400,t:16800},{l:"2022",r:1470,t:17640},{l:"2023",r:1544,t:18528},
+  {l:"2024",r:1621,t:19452},{l:"2025",r:1702,t:20424},{l:"2026 YTD",r:1787,t:5361}
+];
+let cRent=0;
+const rRows=rentY.map(r=>{cRent+=r.t;return{...r,cRent}});
+const TOT_RENT=cRent;
+
+// Opportunity cost
+const SP=0.10;
+const renterWealth=(()=>{
+  let pool=DP;
+  const costs=STMT.map((s,i)=>({mo:i<5?12:3,net:s.t-s.r,rr:rentY[i].r}));
+  for(const yr of costs){const mn=yr.net/yr.mo;for(let m=0;m<yr.mo;m++){pool*=(1+SP/12);const d=mn-yr.rr;if(d>0)pool+=d;}}
+  return pool;
+})();
+const FULL_ADV = EQ + TOTAL_RENTAL_INCOME - renterWealth;
+
+// Standard amort (no extra payments)
+const stdPI=FIN*(MR*Math.pow(1+MR,360))/(Math.pow(1+MR,360)-1);
+let stdBal=FIN;for(let m=0;m<MO_OWNED;m++)stdBal-=(stdPI-stdBal*MR);
+const EXTRA_AHEAD=Math.round(stdBal-BAL);
+
+// From WF amort schedule: with current extras → payoff June 2042
+const PAYOFF_WITH = "June 2042";
+const YRS_SAVED_WITH = 8.5;
+const LIFE_INT_WITH = 74261;
+const LIFE_INT_STD = 123800;
+const INT_SAVED_WITH = LIFE_INT_STD - LIFE_INT_WITH;
+
+// ═══ PROJECTION: STOP $500/mo extra after March 2026 ═══
+// Current strategy: $1,204.82 P&I + $144/mo extra + $500/mo extra + quarterly $550
+// If stopping $500: keep $1,204.82 P&I + $144/mo extra + quarterly $550 (from weekly schedule)
+// If stopping $500: just standard P&I $1,204.82 from here
+function projectPayoff(startBal, monthlyExtra, quarterlyExtra) {
+  let bal = startBal, months = 0, totalInt = 0;
+  while (bal > 0 && months < 600) {
+    const int = bal * MR;
+    const princ = stdPI - int + monthlyExtra;
+    if (months > 0 && months % 3 === 0) bal -= quarterlyExtra;
+    bal -= princ;
+    totalInt += int;
+    months++;
+    if (bal < 0) bal = 0;
+  }
+  return { months, totalInt: Math.round(totalInt), payoffDate: getDate(2026, 3, months) };
+}
+
+function getDate(startYr, startMo, addMonths) {
+  const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const m = (startMo - 1 + addMonths) % 12;
+  const y = startYr + Math.floor((startMo - 1 + addMonths) / 12);
+  return `${mo[m]} ${y}`;
+}
+
+// Scenario A: Keep everything ($500/mo + $144/mo + quarterly $550)
+const keepAll = projectPayoff(BAL, 500 + 144, 550);
+
+// Scenario B: Stop $500, keep $144/mo + quarterly $550 (weekly schedule extras)
+const stopExtra500 = projectPayoff(BAL, 144, 550);
+
+// Scenario C: Stop ALL extras, just pay standard P&I
+const stopAllExtras = projectPayoff(BAL, 0, 0);
+
+// Rate comparison
+const p625=310000*(0.0625/12*Math.pow(1+0.0625/12,360))/(Math.pow(1+0.0625/12,360)-1);
+const rateSav=p625-stdPI;
+
+const fmt=n=>n>=0?`$${Math.round(n).toLocaleString()}`:`-$${Math.abs(Math.round(n)).toLocaleString()}`;
+const fmtPct=n=>`${n.toFixed(1)}%`;
+
+// ═══ CARD / STAT HELPERS ═══
+function card(title,content,accent){
+  const c={blue:"border-l-blue-500",green:"border-l-emerald-500",purple:"border-l-violet-500",amber:"border-l-amber-500",red:"border-l-rose-500"};
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 border-l-4 ${c[accent]||c.blue} p-5 mb-4">${title?`<h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">${title}</h3>`:''}${content}</div>`;
+}
+function stat(label,value,sub,large,color){
+  return `<div class="flex flex-col"><span class="text-xs text-gray-500 mb-0.5">${label}</span><span class="${large?'text-2xl':'text-lg'} font-bold ${color||'text-gray-900'}">${value}</span>${sub?`<span class="text-xs text-gray-400 mt-0.5">${sub}</span>`:''}</div>`;
+}
+function bar(w,color,label,value){
+  return `<div class="flex items-center gap-2 mb-2"><div class="w-24 text-xs text-gray-500 text-right shrink-0">${label}</div><div class="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden"><div class="${color} h-full rounded-full flex items-center justify-end pr-2" style="width:${Math.max(w,8)}%"><span class="text-xs font-semibold text-white drop-shadow">${value}</span></div></div></div>`;
+}
+
+// ═══ TAB RENDERERS ═══
+let tab = "summary";
+const tabs = [
+  ["summary","Summary"],["equity","Equity"],["rentvown","Rent vs Own"],
+  ["closing","Closing Costs"],["projection","$500 Projection"],["net","Net Advantage"]
+];
+
+function renderSummary(){
+  return card("Key Numbers",`<div class="grid grid-cols-2 md:grid-cols-4 gap-4">${stat("Purchase Price",fmt(PP))}${stat("Est. Market Value",fmt(MV),null,0,"text-emerald-600")}${stat("Appreciation",fmtPct(APP_PCT),fmtPct(ANN_APP)+"/yr",0,"text-emerald-600")}${stat("Interest Rate",fmtPct(RATE*100),"30yr fixed",0,"text-blue-600")}</div>`,"blue")
+  +card("What You've Built",`<div class="grid grid-cols-2 md:grid-cols-3 gap-4">${stat("Net Equity Gain",fmt(NEG),"Beyond down payment",1,"text-emerald-600")}${stat("Principal Paid Down",fmt(PPAID),fmt(FIN)+" → "+fmt(BAL))}${stat("Home Value Growth",fmt(APP),fmtPct(ANN_APP)+" annualized")}</div>`,"green")
+  +card("Actual Cost of Ownership (from statements)",`<div class="grid grid-cols-2 md:grid-cols-4 gap-4">${stat("Total Interest",fmt(T.cI))}${stat("Total Escrow",fmt(T.cE),"Tax + Insurance")}${stat("Total Principal",fmt(T.cP),"Builds equity",0,"text-emerald-600")}${stat("Total Paid to WF",fmt(T.cT))}</div>`,"amber")
+  +card("Rental Income (Jan 2021 – Aug 2025)",`<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">${stat("Monthly Rate","$1,200","/month")}${stat("Months","56","Jan '21 – Aug '25")}${stat("Total Income",fmt(TOTAL_RENTAL_INCOME),null,1,"text-emerald-600")}${stat("Net Owner Cost",fmt(T.nc),"After roommate income")}</div><div class="bg-violet-50 rounded-lg p-3 text-sm text-gray-700">Your roommate's $1,200/mo exceeded your base P&amp;I of $1,204.82 for nearly 5 years — your housing was essentially free during that period.</div>`,"purple")
+  +card("Extra Payments &amp; Early Payoff",`<div class="grid grid-cols-2 md:grid-cols-4 gap-3">${stat("Ahead of Schedule",fmt(EXTRA_AHEAD),null,0,"text-blue-700")}${stat("Projected Payoff",PAYOFF_WITH,"~"+YRS_SAVED_WITH+" yrs early",0,"text-emerald-600")}${stat("Lifetime Interest",fmt(LIFE_INT_WITH),"Per WF schedule")}${stat("Interest Saved","~"+fmt(INT_SAVED_WITH),"vs standard 30yr",0,"text-emerald-600")}</div><div class="bg-blue-50 rounded-lg p-3 text-sm text-gray-700 mt-3">You switched to weekly payments in August 2022 and have made an extra $500/mo principal payment since the loan opened. Combined with the $144/mo from weekly conversion and quarterly $550 lump sums, your loan pays off in ${PAYOFF_WITH} — roughly ${YRS_SAVED_WITH} years early.</div>`,"blue");
+}
+
+function renderEquity(){
+  return card("Equity Sources",`<div class="mb-4"><p class="text-2xl font-extrabold text-gray-900 mb-1">${fmt(EQ)} total equity</p></div>${bar((DP/EQ)*100,"bg-blue-500","Down Payment",fmt(DP))}${bar((PPAID/EQ)*100,"bg-emerald-500","Paydown",fmt(PPAID))}${bar((APP/EQ)*100,"bg-violet-500","Appreciation",fmt(APP))}<div class="mt-4 pt-4 border-t border-gray-100 text-sm text-gray-600"><p><span class="font-semibold text-emerald-600">${fmt(NEG)}</span> was built, not transferred from savings.</p></div>`,"green")
+  +card("Year-by-Year (Actual Statements)",`<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b border-gray-200"><th class="text-left py-2 text-gray-500">Year</th><th class="text-right py-2 text-gray-500">Balance</th><th class="text-right py-2 text-gray-500">Cum P</th><th class="text-right py-2 text-gray-500">Cum I</th><th class="text-right py-2 text-gray-500">Cum E</th></tr></thead><tbody>${Y.map(y=>`<tr class="border-b border-gray-50"><td class="py-2 font-medium">${y.l}</td><td class="py-2 text-right">${fmt(y.b)}</td><td class="py-2 text-right text-emerald-600">${fmt(y.cP)}</td><td class="py-2 text-right text-gray-500">${fmt(y.cI)}</td><td class="py-2 text-right text-gray-400">${fmt(y.cE)}</td></tr>`).join("")}</tbody></table></div><div class="mt-2 text-xs text-gray-400">All figures from actual Wells Fargo year-to-date statement data.</div>`,"blue");
+}
+
+function renderRentVsOwn(){
+  return card("What Rent Would Have Cost",`<div class="grid grid-cols-3 gap-4 mb-3">${stat("Starting Rent","$1,400","/month")}${stat("Est. Rent Today",fmt(rentY[5].r),"/month at ~5%/yr")}${stat("Total Rent",fmt(TOT_RENT),"Over "+MO_OWNED+" months",0,"text-rose-600")}</div>`,"purple")
+  +card("Year-by-Year Comparison",`<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b border-gray-200"><th class="text-left py-2 text-gray-500">Year</th><th class="text-right py-2 text-gray-500">Cum Rent</th><th class="text-right py-2 text-gray-500">Paid to WF</th><th class="text-right py-2 text-gray-500">Roommate</th><th class="text-right py-2 text-gray-500">Net Cost</th></tr></thead><tbody>${Y.map((y,i)=>`<tr class="border-b border-gray-50"><td class="py-2 font-medium">${y.l}</td><td class="py-2 text-right text-rose-600">${fmt(rRows[i].cRent)}</td><td class="py-2 text-right text-gray-400">${fmt(y.cT)}</td><td class="py-2 text-right text-emerald-600">${fmt(y.cR)}</td><td class="py-2 text-right font-semibold">${fmt(y.nc)}</td></tr>`).join("")}</tbody></table></div>`,"amber")
+  +card("Sunk Costs vs. Money Kept",`<div class="grid grid-cols-2 gap-4"><div class="bg-red-50 rounded-lg p-4"><p class="text-xs text-red-400 uppercase font-semibold mb-2">Gone (sunk)</p><div class="space-y-1"><div class="flex justify-between text-sm"><span>Interest</span><span class="font-semibold">${fmt(T.cI)}</span></div><div class="flex justify-between text-sm"><span>Escrow</span><span class="font-semibold">${fmt(T.cE)}</span></div><div class="flex justify-between text-sm"><span>Closing costs (net)</span><span class="font-semibold">${fmt(NET_CLOSING_COSTS)}</span></div><div class="flex justify-between border-t border-red-200 pt-1 text-sm font-bold text-red-600"><span>Total sunk</span><span>${fmt(T.cI+T.cE+NET_CLOSING_COSTS)}</span></div></div></div><div class="bg-emerald-50 rounded-lg p-4"><p class="text-xs text-emerald-500 uppercase font-semibold mb-2">Kept (equity + cash)</p><div class="space-y-1"><div class="flex justify-between text-sm"><span>Down payment</span><span class="font-semibold">${fmt(DP)}</span></div><div class="flex justify-between text-sm"><span>Principal paid</span><span class="font-semibold">${fmt(PPAID)}</span></div><div class="flex justify-between text-sm"><span>Appreciation</span><span class="font-semibold">${fmt(APP)}</span></div><div class="flex justify-between text-sm"><span>Rental income</span><span class="font-semibold">${fmt(TOTAL_RENTAL_INCOME)}</span></div><div class="flex justify-between border-t border-emerald-200 pt-1 text-sm font-bold text-emerald-600"><span>Total kept</span><span>${fmt(EQ+TOTAL_RENTAL_INCOME)}</span></div></div></div></div>`,"red");
+}
+
+function renderClosing(){
+  return card("Closing Disclosure Summary (Dec 30, 2020)",`<div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">${stat("Sale Price",fmt(PP))}${stat("Loan Amount",fmt(FIN))}${stat("Down Payment",fmt(DP),fmtPct(DP/PP*100)+" of price")}${stat("Cash to Close",fmt(CASH_TO_CLOSE),"Total out of pocket")}${stat("Closing Costs",fmt(CLOSING_COSTS_TOTAL),"Borrower-paid")}${stat("Seller Credit",fmt(SELLER_CREDIT),"Applied to costs")}</div>`,"blue")
+  +card("Closing Cost Breakdown",`<div class="text-sm text-gray-700 space-y-2"><div class="bg-gray-50 rounded-lg p-4 space-y-2"><div class="flex justify-between"><span>Origination charges</span><span class="font-semibold">$1,470</span></div><div class="flex justify-between"><span>Services borrower did not shop for</span><span class="font-semibold">$725</span></div><div class="flex justify-between"><span>Services borrower did shop for</span><span class="font-semibold">$2,538</span></div><div class="flex justify-between border-t pt-1 font-semibold"><span>Total loan costs (D)</span><span>$4,733</span></div><div class="mt-2 flex justify-between"><span>Recording fees</span><span class="font-semibold">$84</span></div><div class="flex justify-between"><span>Prepaids (insurance + interest + tax)</span><span class="font-semibold">$1,586</span></div><div class="flex justify-between"><span>Initial escrow deposit (3 months)</span><span class="font-semibold">$3,308</span></div><div class="flex justify-between"><span>Home warranty + commissions + other</span><span class="font-semibold">$691</span></div><div class="flex justify-between border-t pt-1 font-semibold"><span>Total other costs (I)</span><span>$5,669</span></div><div class="flex justify-between border-t-2 border-gray-300 pt-2 text-base font-bold"><span>Total closing costs</span><span>$10,402</span></div><div class="flex justify-between text-emerald-600"><span>Less: seller credit</span><span>-$8,500</span></div><div class="flex justify-between font-bold text-blue-700"><span>Net closing costs to you</span><span>$1,902</span></div></div></div>`,"amber")
+  +card("True Total Investment in This Property",`<div class="grid grid-cols-2 md:grid-cols-3 gap-4">${stat("Down Payment",fmt(DP))}${stat("Net Closing Costs",fmt(NET_CLOSING_COSTS),"After seller credit")}${stat("Total Cash Invested",fmt(DP+NET_CLOSING_COSTS),null,1,"text-blue-700")}${stat("Current Equity",fmt(EQ),null,1,"text-emerald-600")}${stat("Return on Cash",fmtPct((EQ-(DP+NET_CLOSING_COSTS))/(DP+NET_CLOSING_COSTS)*100),"On your cash invested",0,"text-emerald-600")}${stat("+ Rental Income",fmt(TOTAL_RENTAL_INCOME),"Cash collected")}</div><div class="bg-emerald-50 rounded-lg p-3 text-sm text-gray-700 mt-3">You invested ${fmt(DP+NET_CLOSING_COSTS)} in cash. That has turned into ${fmt(EQ)} in equity plus ${fmt(TOTAL_RENTAL_INCOME)} in rental income — a total return of <span class="font-bold text-emerald-600">${fmtPct((EQ+TOTAL_RENTAL_INCOME-(DP+NET_CLOSING_COSTS))/(DP+NET_CLOSING_COSTS)*100)}</span> on your cash in ${(MO_OWNED/12).toFixed(1)} years.</div>`,"green");
+}
+
+function renderProjection(){
+  return card("What Happens If You Stop the $500/mo Extra Payment?",`<div class="bg-gray-50 rounded-lg p-4 mb-4 text-sm text-gray-700"><p class="font-semibold mb-2">Your current extra payment strategy:</p><p>$500/mo extra principal (since loan opened) + $144/mo from weekly conversion + quarterly $550 lump sum. You asked: what if March 2026 is the last month of the $500?</p></div><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b border-gray-200 bg-gray-50"><th class="text-left py-3 px-2 text-gray-500">Scenario</th><th class="text-right py-3 px-2 text-gray-500">Payoff Date</th><th class="text-right py-3 px-2 text-gray-500">Remaining Interest</th><th class="text-right py-3 px-2 text-gray-500">Months Left</th></tr></thead><tbody><tr class="border-b border-gray-50 bg-emerald-50"><td class="py-3 px-2 font-medium text-emerald-700">A: Keep everything</td><td class="py-3 px-2 text-right font-semibold">${keepAll.payoffDate}</td><td class="py-3 px-2 text-right">${fmt(keepAll.totalInt)} remaining</td><td class="py-3 px-2 text-right">${keepAll.months} from now</td></tr><tr class="border-b border-gray-50 bg-blue-50"><td class="py-3 px-2 font-medium text-blue-700">B: Stop $500, keep weekly extras</td><td class="py-3 px-2 text-right font-semibold">${stopExtra500.payoffDate}</td><td class="py-3 px-2 text-right">${fmt(stopExtra500.totalInt)} remaining</td><td class="py-3 px-2 text-right">${stopExtra500.months} from now</td></tr><tr class="border-b border-gray-50"><td class="py-3 px-2 font-medium text-gray-600">C: Stop ALL extras, just P&amp;I</td><td class="py-3 px-2 text-right font-semibold">${stopAllExtras.payoffDate}</td><td class="py-3 px-2 text-right">${fmt(stopAllExtras.totalInt)} remaining</td><td class="py-3 px-2 text-right">${stopAllExtras.months} from now</td></tr></tbody></table></div>`,"purple")
+  +card("Impact Analysis",`<div class="space-y-3 text-sm text-gray-700"><div class="bg-blue-50 rounded-lg p-4"><p class="font-semibold text-blue-700 mb-1">Stopping the $500 (Scenario B):</p><p>Your loan still pays off well ahead of the standard schedule thanks to the weekly conversion extras ($144/mo + quarterly $550). You would pay approximately <span class="font-bold">${fmt(stopExtra500.totalInt - keepAll.totalInt)}</span> more in remaining interest than keeping the $500, and the payoff shifts from ${keepAll.payoffDate} to ${stopExtra500.payoffDate}.</p></div><div class="bg-amber-50 rounded-lg p-4"><p class="font-semibold text-amber-700 mb-1">That $500/mo freed up could:</p><ul class="list-disc ml-5 space-y-1"><li>Invested in S&amp;P 500 at 10%/yr for ${stopExtra500.months} months ≈ <span class="font-bold text-emerald-600">${fmt(500*((Math.pow(1+SP/12,stopExtra500.months)-1)/(SP/12)))}</span></li><li>Fund home improvements that increase property value</li><li>Build an emergency fund or accelerate other financial goals</li></ul></div><div class="bg-gray-50 rounded-lg p-4"><p class="font-semibold mb-1">The math:</p><p>At your 2.375% rate, every $500 toward the mortgage saves ~$1/mo in interest. That same $500 invested at even 7% earns ~$2.92/mo. <span class="font-bold">Investing the $500 elsewhere likely builds more wealth than prepaying this ultra-low-rate mortgage.</span></p></div></div>`,"amber")
+  +card("Monthly Payment Comparison",`<div class="grid grid-cols-1 md:grid-cols-3 gap-3"><div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-center"><p class="text-xs text-gray-500">Current (all extras)</p><p class="text-xl font-bold text-gray-900">${fmt(ORIG_PI + 500 + 144)}/mo</p><p class="text-xs text-gray-400">+ quarterly $550</p></div><div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center"><p class="text-xs text-gray-500">Stop $500 only</p><p class="text-xl font-bold text-gray-900">${fmt(ORIG_PI + 144)}/mo</p><p class="text-xs text-gray-400">+ quarterly $550</p></div><div class="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center"><p class="text-xs text-gray-500">Standard P&amp;I only</p><p class="text-xl font-bold text-gray-900">${fmt(ORIG_PI)}/mo</p><p class="text-xs text-gray-400">No extras</p></div></div>`,"blue");
+}
+
+function renderNet(){
+  return card("Buy vs. Rent: Net Wealth Comparison",`<div class="bg-gray-50 rounded-lg p-4 mb-4 text-sm text-gray-700"><p class="font-semibold mb-1">What if you had rented and invested the difference?</p><p>Renter takes ${fmt(DP)} down payment + monthly savings and invests in S&amp;P 500 at ~10%/yr.</p></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="bg-blue-50 border border-blue-100 rounded-lg p-4"><p class="text-xs text-blue-500 uppercase font-semibold mb-2">You Bought</p><p class="text-2xl font-extrabold text-blue-700">${fmt(EQ+TOTAL_RENTAL_INCOME)}</p><p class="text-sm text-gray-500">Equity + rental income</p></div><div class="bg-gray-50 border border-gray-200 rounded-lg p-4"><p class="text-xs text-gray-500 uppercase font-semibold mb-2">Rented + Invested</p><p class="text-2xl font-extrabold text-gray-700">${fmt(renterWealth)}</p><p class="text-sm text-gray-500">DP + savings at 10%/yr</p></div></div><div class="rounded-lg p-5 text-center ${FULL_ADV>0?'bg-emerald-50 border border-emerald-200':'bg-rose-50 border border-rose-200'}"><p class="text-sm text-gray-500 mb-1">Net Advantage of Buying</p><p class="text-3xl font-extrabold ${FULL_ADV>0?'text-emerald-600':'text-rose-600'}">${FULL_ADV>0?'+':''}${fmt(FULL_ADV)}</p></div>`,"green")
+  +card("Your 2.375% Rate Superpower",`<div class="text-sm text-gray-700 space-y-3"><div class="grid grid-cols-2 gap-3"><div class="bg-violet-50 rounded-lg p-3"><p class="text-xs text-violet-500 font-semibold mb-1">Your P&amp;I</p><p class="text-xl font-bold">${fmt(stdPI)}<span class="text-sm font-normal text-gray-500">/mo</span></p></div><div class="bg-gray-100 rounded-lg p-3"><p class="text-xs text-gray-500 font-semibold mb-1">Same loan at 6.25%</p><p class="text-xl font-bold">${fmt(p625)}<span class="text-sm font-normal text-gray-500">/mo</span></p></div></div><p><span class="font-bold text-emerald-600">${fmt(rateSav)}/mo less</span> than today's rates. Over 30 years: <span class="font-bold">${fmt(rateSav*360)}</span> saved.</p></div>`,"purple")
+  +card("The Bottom Line",`<div class="text-sm text-gray-700 space-y-2"><p class="text-base font-semibold text-gray-900">In ${MO_OWNED} months, you built ${fmt(NEG)} in equity beyond your ${fmt(DP)} down payment, collected ${fmt(TOTAL_RENTAL_INCOME)} in rental income, and your extra payments will save ~${fmt(INT_SAVED_WITH)} in lifetime interest while paying off ${YRS_SAVED_WITH} years early.</p><p>Your total cash investment was ${fmt(DP+NET_CLOSING_COSTS)} (including net closing costs). That has generated ${fmt(EQ+TOTAL_RENTAL_INCOME)} in equity + cash — a <span class="font-bold text-emerald-600">${fmtPct((EQ+TOTAL_RENTAL_INCOME-(DP+NET_CLOSING_COSTS))/(DP+NET_CLOSING_COSTS)*100)} return</span>. Even against investing in the S&amp;P 500, buying wins by <span class="font-bold text-emerald-600">${fmt(FULL_ADV)}</span>.</p></div>`,"green")
+  +`<div class="text-xs text-gray-400 mt-4"><p>Sources: Wells Fargo statements (Dec 2021–Mar 2026), WF amortization schedule (Aug 2022), Closing Disclosure (Dec 30, 2020), WF app balance (Mar 8, 2026). Home value: Harris County tax appraisal $609K. Rent: 5%/yr from $1,400. S&amp;P 500 at 10%/yr. Excludes maintenance and ~6% selling fees. Analysis prepared March 10, 2026.</p></div>`;
+}
+
+// ═══ RENDER ═══
+function render(){
+  const tabBtns=tabs.map(([id,label])=>`<button onclick="switchTab('${id}')" class="px-3 py-2 text-sm font-medium rounded-lg transition-all ${tab===id?'bg-blue-600 text-white shadow-sm':'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${label}</button>`).join("");
+  let content="";
+  if(tab==="summary")content=renderSummary();
+  else if(tab==="equity")content=renderEquity();
+  else if(tab==="rentvown")content=renderRentVsOwn();
+  else if(tab==="closing")content=renderClosing();
+  else if(tab==="projection")content=renderProjection();
+  else if(tab==="net")content=renderNet();
+
+  document.getElementById("root").innerHTML=`
+    <div class="mb-6"><h1 class="text-2xl font-bold text-gray-900 mb-1">Home Wealth Analysis</h1><p class="text-sm text-gray-500">607 W Polk St Unit B, Houston TX — Purchased Dec 30, 2020 — ${MO_OWNED} months</p><p class="text-xs text-emerald-600 mt-1 font-medium">Built from Wells Fargo statements, closing disclosure &amp; amortization schedule</p></div>
+    <div class="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 mb-6 text-white shadow-lg"><p class="text-blue-200 text-xs uppercase tracking-widest mb-1">Total Home Equity</p><p class="text-4xl font-extrabold mb-1">${fmt(EQ)}</p><p class="text-blue-200 text-sm mb-4">Value ${fmt(MV)} − balance ${fmt(BAL)}</p><div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-blue-400/30"><div><p class="text-blue-200 text-xs">Down Payment</p><p class="text-lg font-bold">${fmt(DP)}</p></div><div><p class="text-blue-200 text-xs">Principal Paid</p><p class="text-lg font-bold">${fmt(PPAID)}</p></div><div><p class="text-blue-200 text-xs">Appreciation</p><p class="text-lg font-bold">${fmt(APP)}</p></div><div><p class="text-blue-200 text-xs">Rental Income</p><p class="text-lg font-bold">${fmt(TOTAL_RENTAL_INCOME)}</p></div></div></div>
+    <div class="flex gap-2 mb-5 flex-wrap">${tabBtns}</div>${content}`;
+}
+function switchTab(t){tab=t;render();}
+render();
+</script>
+</body>
+</html>
